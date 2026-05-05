@@ -1,135 +1,199 @@
+import os
+import sys
 import streamlit as st
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-import random
-import sys
-import os
 
-# --- PATH SETUP ---
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
+# ── Path resolution ───────────────────────────────────────────────────────────
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, BASE_DIR)
 
-# Attempting imports from your custom modules
-try:
-    from tab_df import display as df_display, logics as df_logics
-    from tab_text import display as text_display
-    from tab_numeric import display as numeric_display
-    from tab_date import display as date_display
-except ImportError:
-    st.error("Custom modules not found. Check your folder structure.")
+DATASET_DEFAULT = os.path.join(BASE_DIR, "..", "crop_yield_dataset.csv")
 
-# --- PAGE CONFIG ---
-st.set_page_config(page_title="Crop Recommendation System", layout="wide", initial_sidebar_state="expanded")
+# ── Module imports ────────────────────────────────────────────────────────────
+from tab_df import display as df_display
+from tab_numeric import display as numeric_display
+from tab_text import display as text_display
+from tab_date import display as date_display
+from tab_rl import display as rl_display
+from tab_ann import display as ann_display
+from tab_genai import display as genai_display
 
-st.title("Crop Recommendation System")
-st.markdown("### - AI Optimal Crop Selection based on Soil and Weather Data")
+# ── Page config ───────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="CropAI — Intelligent Crop Recommendation System",
+    page_icon="🌾",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-# --- SIDEBAR & UPLOAD ---
-st.sidebar.header("Data Settings")
-uploaded_file = st.sidebar.file_uploader("Upload CSV", type=["csv"])
+# ── Custom CSS ────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+    /* Metric card styling */
+    div[data-testid="metric-container"] {
+        background: rgba(33, 150, 243, 0.08);
+        border: 1px solid rgba(33, 150, 243, 0.2);
+        border-radius: 8px;
+        padding: 12px;
+    }
+    /* Tab font */
+    .stTabs [data-baseweb="tab"] {
+        font-size: 14px;
+        font-weight: 600;
+    }
+    /* Sidebar header */
+    section[data-testid="stSidebar"] h2 {
+        color: #4CAF50;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-st.sidebar.markdown("---")
-st.sidebar.subheader("RL Parameters")
-alpha = st.sidebar.slider("Learning Rate (α)", 0.01, 1.0, 0.1)
-gamma = st.sidebar.slider("Discount Factor (γ)", 0.5, 0.99, 0.9)
-episodes = st.sidebar.number_input("Episodes", 100, 5000, 500)
+# ── Header ────────────────────────────────────────────────────────────────────
+st.title("🌾 CropAI — Intelligent Crop Recommendation System")
+st.markdown(
+    "*Integrating Reinforcement Learning · Artificial Neural Networks · Generative AI "
+    "to optimise agricultural crop selection from soil and weather data.*"
+)
 
-if uploaded_file:
-    # Use your logic to load CSV
-    df = pd.read_csv(uploaded_file)
-    if 'df_logics' in locals():
-        df = df_logics.load_csv(uploaded_file)
-    
-    df['Date'] = pd.to_datetime(df['Date'])
-    st.sidebar.success(f"Loaded: {uploaded_file.name}")
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.image("https://img.icons8.com/fluency/96/wheat.png", width=80)
+    st.markdown("## 🌾 CropAI Settings")
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📊 Overview", "🔢 Numeric", "🔤 Text", "📅 Date", "🤖 RL Yield Model"
-    ])
+    # ── Dataset ───────────────────────────────────────────────────────────────
+    st.markdown("### 📂 Dataset")
+    use_default = os.path.isfile(DATASET_DEFAULT)
+    upload_label = "Upload a CSV file" if not use_default else "Upload a custom CSV (or use bundled)"
+    uploaded_file = st.file_uploader(upload_label, type=["csv"])
 
-    # Standard Tabs (1-4)
-    with tab1:
-        if 'df_display' in locals(): df_display.overview(df)
-        else: st.write(df.head())
-    with tab2:
-        if 'numeric_display' in locals(): numeric_display.numeric_series(df)
-    with tab3:
-        if 'text_display' in locals(): text_display.text_series(df)
-    with tab4:
-        if 'date_display' in locals(): date_display.datetime_series(df)
+    if uploaded_file:
+        df_raw = pd.read_csv(uploaded_file)
+        st.success(f"✅ Loaded: {uploaded_file.name} ({len(df_raw):,} rows)")
+    elif use_default:
+        df_raw = pd.read_csv(DATASET_DEFAULT)
+        st.success(f"✅ Using bundled dataset ({len(df_raw):,} rows)")
+    else:
+        df_raw = None
+        st.warning("Upload a CSV file to begin.")
 
-    # --- TAB 5: RL LOGIC + DOWNLOAD ---
-    with tab5:
-        st.header("Temporal Difference (TD) Learning Grid")
-        
-        # 1. Preprocessing
-        cat_cols = [col for col in ["Crop_Type", "Soil_Type"] if col in df.columns]
-        df_encoded = pd.get_dummies(df, columns=cat_cols).sort_values("Date")
-        
-        grid_size = int(len(df_encoded)**0.5)
-        n_states = grid_size * grid_size
-        
-        # 2. RL Functions
-        def get_possible_actions(s):
-            row, col = divmod(s, grid_size)
-            actions = []
-            if col > 0: actions.append(0)
-            if col < grid_size - 1: actions.append(1)
-            if row > 0: actions.append(2)
-            if row < grid_size - 1: actions.append(3)
-            return actions
+    st.markdown("---")
 
-        def next_state(s, a):
-            if a == 0: return s - 1
-            if a == 1: return s + 1
-            if a == 2: return s - grid_size
-            if a == 3: return s + grid_size
-            return s
+    # ── RL Parameters ─────────────────────────────────────────────────────────
+    st.markdown("### 🤖 RL — Q-Learning Parameters")
+    rl_alpha = st.slider("Learning Rate (α)", 0.01, 1.0, 0.1, 0.01,
+                         help="How aggressively Q-values update from new rewards.")
+    rl_gamma = st.slider("Discount Factor (γ)", 0.5, 0.99, 0.9, 0.01,
+                         help="Weight of future vs. immediate rewards.")
+    rl_epsilon = st.slider("Initial Exploration (ε)", 0.05, 1.0, 0.3, 0.05,
+                           help="Probability of random action at episode start.")
+    rl_episodes = st.number_input("Training Episodes", 100, 5000, 500, step=100)
+    rl_temp_bins = st.selectbox("Temperature Bins", [6, 8, 10], index=1)
+    rl_hum_bins = st.selectbox("Humidity Bins", [6, 8, 10], index=1)
 
-        def get_reward(s):
-            return df_encoded.iloc[s]["Crop_Yield"] if "Crop_Yield" in df_encoded.columns else 0
+    st.markdown("---")
 
-        # 3. Training Execution
-        if st.button("🚀 Run RL Training"):
-            V = np.zeros(n_states)
-            bar = st.progress(0)
-            
-            for ep in range(episodes):
-                state = 0
-                for _ in range(50):
-                    actions = get_possible_actions(state)
-                    if not actions: break
-                    n_s = next_state(state, random.choice(actions))
-                    reward = get_reward(n_s)
-                    V[state] += alpha * (reward + gamma * V[n_s] - V[state])
-                    state = n_s
-                if ep % (max(1, episodes // 10)) == 0:
-                    bar.progress(ep / episodes)
-            bar.empty()
-            
-            # Store in session state for persistency
-            st.session_state.trained_V = V.reshape(grid_size, grid_size)
-            st.success("Training Complete!")
+    # ── ANN Parameters ────────────────────────────────────────────────────────
+    st.markdown("### 🧠 ANN — MLP Parameters")
+    ann_layers_str = st.text_input(
+        "Hidden Layer Sizes (comma-separated)", "128,64,32",
+        help="E.g. '128,64,32' → three hidden layers of 128, 64, and 32 neurons."
+    )
+    try:
+        ann_hidden = tuple(int(x.strip()) for x in ann_layers_str.split(",") if x.strip())
+        if not ann_hidden:
+            ann_hidden = (128, 64, 32)
+    except ValueError:
+        ann_hidden = (128, 64, 32)
+        st.warning("Invalid layer sizes, using default (128, 64, 32).")
 
-        # 4. Display & Export
-        if 'trained_V' in st.session_state:
-            V_grid = st.session_state.trained_V
-            
-            # Visualization
-            fig, ax = plt.subplots(figsize=(8, 6))
-            sns.heatmap(V_grid, annot=True, cmap="YlGnBu", ax=ax)
-            st.pyplot(fig)
-            
-            # Download Button
-            v_df = pd.DataFrame(V_grid)
-            csv_data = v_df.to_csv(index=False).encode('utf-8')
-            
-            st.download_button(
-                label="📥 Download Learned Value Table (CSV)",
-                data=csv_data,
-                file_name="learned_crop_values.csv",
-                mime="text/csv",
-            )
-else:
-    st.info("Please upload a CSV file to begin.")
+    ann_activation = st.selectbox("Activation Function", ["relu", "tanh", "logistic"], index=0)
+    ann_alpha = st.select_slider("L2 Regularisation (α)", [1e-5, 1e-4, 1e-3, 1e-2], value=1e-4,
+                                 format_func=lambda x: f"{x:.0e}")
+    ann_max_iter = st.number_input("Max Training Iterations", 100, 2000, 500, step=100)
+
+    st.markdown("---")
+
+    # ── GenAI Parameters ──────────────────────────────────────────────────────
+    st.markdown("### ✨ GenAI — RAG Settings")
+
+    # Auto-load API key from .env if present
+    _env_path = os.path.join(BASE_DIR, ".env")
+    _default_key = ""
+    if os.path.isfile(_env_path):
+        with open(_env_path) as _f:
+            for _line in _f:
+                if _line.startswith("OPENAI_API_KEY="):
+                    _default_key = _line.split("=", 1)[1].strip()
+                    break
+
+    genai_api_key = st.text_input(
+        "OpenAI API Key", value=_default_key, type="password",
+        help="Loaded automatically from .env if present."
+    )
+    genai_n_similar = st.slider("RAG Context Records (k)", 3, 10, 5,
+                                help="Number of similar historical records sent as context to GPT.")
+
+    st.markdown("---")
+    st.caption("AI Group 3 · CropAI Project · 2026")
+
+# ── Guard: no data ────────────────────────────────────────────────────────────
+if df_raw is None:
+    st.info("👈 Please upload a CSV file using the sidebar to get started.")
+    st.stop()
+
+# ── Preprocessing ─────────────────────────────────────────────────────────────
+df = df_raw.copy()
+if "Date" in df.columns:
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+
+# ── Tabs ──────────────────────────────────────────────────────────────────────
+TAB_LABELS = [
+    "📊 Overview",
+    "🔢 Numeric",
+    "🔤 Text",
+    "📅 Date",
+    "🤖 Reinforcement Learning",
+    "🧠 Neural Network",
+    "✨ GenAI Advisor",
+]
+
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(TAB_LABELS)
+
+with tab1:
+    df_display.overview(df)
+
+with tab2:
+    numeric_display.numeric_serie(df)
+
+with tab3:
+    text_display.text_serie(df)
+
+with tab4:
+    date_display.datetime_serie(df)
+
+with tab5:
+    rl_display.render(
+        df,
+        alpha=rl_alpha,
+        gamma=rl_gamma,
+        epsilon=rl_epsilon,
+        episodes=int(rl_episodes),
+        n_temp_bins=rl_temp_bins,
+        n_humidity_bins=rl_hum_bins,
+    )
+
+with tab6:
+    ann_display.render(
+        df,
+        hidden_layers=ann_hidden,
+        activation=ann_activation,
+        alpha=ann_alpha,
+        max_iter=int(ann_max_iter),
+    )
+
+with tab7:
+    genai_display.render(
+        df,
+        api_key=genai_api_key,
+        n_similar=genai_n_similar,
+    )
