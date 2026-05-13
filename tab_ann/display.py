@@ -51,7 +51,8 @@ Permutation-based feature importance is computed post-training on the held-out t
     regression_mode = task.startswith("Yield")
 
     if st.button("🧠 Train Neural Network", type="primary", use_container_width=True):
-    
+
+        
         start_time = time.time()
 
     with st.spinner("Preprocessing & training…"):
@@ -64,7 +65,7 @@ Permutation-based feature importance is computed post-training on the held-out t
             )
 
             imp_df = logics.feature_importance(model, X_te_s, y_te, feat_names)
-
+            
             train_time = time.time() - start_time
 
             ann_results = {
@@ -101,13 +102,14 @@ Permutation-based feature importance is computed post-training on the held-out t
 
         else:
             X, y, feat_names, le = logics.preprocess_classification(df)
-
+            
+            start_time = time.time()
             model, scaler, X_te_s, y_te, y_pred, y_proba, metrics = logics.train_classifier(
                 X, y, le, hidden_layers, activation, alpha, max_iter
             )
 
             imp_df = logics.feature_importance(model, X_te_s, y_te, feat_names)
-
+           
             train_time = time.time() - start_time
 
             ann_results = {
