@@ -5,6 +5,9 @@ import streamlit as st
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, r2_score, accuracy_score, f1_score
 from dotenv import load_dotenv
+import time
+
+
 
 # Load .env file
 load_dotenv()
@@ -72,6 +75,11 @@ with st.sidebar:
         st.warning("Upload a CSV file to begin.")
 
     st.markdown("---")
+    st.markdown("### ⚙️ Preprocessing Parameters")
+    n_temp_bins = st.slider("Temperature bins", 2, 20, 8, step=1)
+    n_humidity_bins = st.slider("Humidity bins", 2, 20, 8, step=1)
+
+    st.markdown("---")
 
     # RL PARAMETERS
     st.markdown("### 🤖 RL — Q-Learning Parameters")
@@ -134,7 +142,7 @@ with tab5:
         gamma=rl_gamma,
         epsilon=rl_epsilon,
         episodes=int(rl_episodes)
-      
+       
     )
 
 with tab6:
@@ -143,8 +151,9 @@ with tab6:
         hidden_layers=ann_hidden,
         activation=ann_activation,
         alpha=ann_alpha,
-        max_iter=int(ann_max_iter)
-  
+        max_iter=int(ann_max_iter),
+        n_temp_bins=int(n_temp_bins),
+        n_humidity_bins=int(n_humidity_bins)
     )
 
 # ── NEW TAB:  Comparison ─────────────────────────────────────────────────

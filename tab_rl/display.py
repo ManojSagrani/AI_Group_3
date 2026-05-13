@@ -1,5 +1,5 @@
 # ================================
-# tab_rl/display.py (CLEAN VERSION)
+# tab_rl/display.py (FIXED VERSION)
 # ================================
 
 import streamlit as st
@@ -22,17 +22,19 @@ def render(df, alpha, gamma, epsilon, episodes):
     st.title("🌾 RL Crop Optimisation (Q-Learning)")
 
     # =========================
-    # TRAIN MODEL
+    # TRAIN MODEL (ONLY ON CLICK)
     # =========================
     if st.button("🚀 Train Model", use_container_width=True):
 
         with st.spinner("Training Q-learning agent..."):
             res = logics.build_rl_model(
                 df,
-                alpha,
-                gamma,
-                epsilon,
-                episodes
+                n_temp_bins=8,
+                n_humidity_bins=8,
+                alpha=alpha,
+                gamma=gamma,
+                epsilon=epsilon,
+                episodes=episodes
             )
 
         st.session_state.rl_results = res
@@ -45,6 +47,7 @@ def render(df, alpha, gamma, epsilon, episodes):
         st.info("Click **Train Model** to begin.")
         return
 
+    # ✅ USE STORED RESULTS ONLY (NO RETRAINING)
     res = st.session_state.rl_results
 
     Q = res["Q"]
@@ -185,18 +188,15 @@ def render(df, alpha, gamma, epsilon, episodes):
         st.success("Policy outperforms random baseline")
     else:
         st.error("Policy underperforms random baseline")
-        
-        
-    # ── Ethical Considerations ────────────────────────────────────────────────
+
+    # =========================
+    # ETHICS
+    # =========================
     with st.expander("⚠️ Ethical Considerations & Limitations"):
         st.markdown("""
-- **Data representativeness**: The reward table is derived from historical records that may not reflect
-  future climate extremes or data-scarce regions.
-- **Oversimplification**: Temperature and Humidity alone do not capture all agronomic factors
-  (disease pressure, market prices, labour availability).
-- **Stochastic transitions**: Real weather is correlated over time; the i.i.d. next-state assumption
-  may overestimate the policy's generalisation to unseen conditions.
-- **Equity**: Automated recommendations without local agronomist validation may harm smallholder
-  farmers who lack the resources to act on suboptimal suggestions.
-- **Transparency**: All Q-values and reward tables are fully downloadable, supporting auditability.
+- Data may not represent future climate conditions
+- Only temperature and humidity are used (oversimplification)
+- Weather is assumed independent (not realistic)
+- Recommendations should be validated by agronomists
+- Model is fully transparent and auditable via Q-table
         """)
