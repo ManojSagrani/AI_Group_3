@@ -141,3 +141,44 @@ def crop_state_distribution(optimal_crops, crop_types, n_temp_bins, n_humidity_b
     n_states = n_temp_bins * n_humidity_bins
     grid = np.array([crop_types.index(c) for c in optimal_crops]).reshape(n_temp_bins, n_humidity_bins)
     return grid
+
+def build_rl_model(df, n_temp_bins=8, n_humidity_bins=8,
+                   alpha=0.1, gamma=0.9, episodes=500):
+
+    R, R_norm, crop_types, n_states, n_actions, temp_labels, hum_labels, n_tb, n_hb, R_max = \
+        prepare_rl_environment(df, n_temp_bins, n_humidity_bins)
+
+    Q, episode_rewards, epsilon_history, q_delta_history = run_q_learning(
+        R_norm, n_states, n_actions,
+        alpha=alpha,
+        gamma=gamma,
+        episodes=episodes
+    )
+
+    optimal_crops, optimal_idx = get_optimal_policy(Q, crop_types)
+
+    learned, random_mean = policy_improvement_ratio(R, optimal_idx)
+
+    grid = crop_state_distribution(
+        optimal_crops, crop_types, n_temp_bins, n_humidity_bins
+    )
+
+    return {
+        "R": R,
+        "R_norm": R_norm,
+        "Q": Q,
+        "crop_types": crop_types,
+        "n_states": n_states,
+        "n_actions": n_actions,
+        "temp_labels": temp_labels,
+        "hum_labels": hum_labels,
+        "Q_rewards": episode_rewards,
+        "epsilon": epsilon_history,
+        "q_delta": q_delta_history,
+        "optimal_crops": optimal_crops,
+        "optimal_idx": optimal_idx,
+        "policy_score": learned,
+        "random_score": random_mean,
+        "policy_grid": grid,
+        "R_max": R_max
+    }

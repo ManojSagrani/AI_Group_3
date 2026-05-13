@@ -1,8 +1,16 @@
 import os
 import sys
+from openai import api_key
 import streamlit as st
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, r2_score, accuracy_score, f1_score
+from dotenv import load_dotenv
+
+# Load .env file
+load_dotenv()
+
+# Read API key
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # ── Path resolution ───────────────────────────────────────────────────────────
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -125,7 +133,8 @@ with tab5:
         alpha=rl_alpha,
         gamma=rl_gamma,
         epsilon=rl_epsilon,
-        episodes=int(rl_episodes),
+        episodes=int(rl_episodes)
+      
     )
 
 with tab6:
@@ -134,47 +143,147 @@ with tab6:
         hidden_layers=ann_hidden,
         activation=ann_activation,
         alpha=ann_alpha,
-        max_iter=int(ann_max_iter),
+        max_iter=int(ann_max_iter)
+  
     )
 
-# ── NEW TAB: Model Comparison ─────────────────────────────────────────────────
+# ── NEW TAB:  Comparison ─────────────────────────────────────────────────
+# ──  COMPARISON TAB ──────────────────────────────────────────────────────
 with tab7:
-    st.subheader("📈 Compare Reinforcement Learning vs MLP Model")
+    st.subheader("📊 Research-Grade Model Comparison (RL vs ANN)")
 
-    if "rl_results" not in locals() or "ann_results" not in locals():
-        st.warning("⚠️ Train both models first in their respective tabs.")
+    rl = st.session_state.get("rl_results")
+    ann = st.session_state.get("ann_results")
+
+    # ---------------- SAFETY ----------------
+    if rl is None or ann is None:
+        st.warning("⚠️ Please train BOTH RL and ANN models first.")
+        st.stop()
+
+    if not isinstance(rl, dict) or not isinstance(ann, dict):
+        st.error("❌ Invalid model outputs.")
+        st.stop()
+
+    st.markdown("## 📌 Performance + Efficiency Overview")
+
+    col1, col2 = st.columns(2)
+
+    # ---------------- RL ----------------
+    with col1:
+        st.markdown("### 🤖 Reinforcement Learning")
+
+        rl_mae = rl.get("mae", 0)
+        rl_r2 = rl.get("r2", None)
+        rl_acc = rl.get("accuracy", None)
+        rl_time = rl.get("train_time", 0)
+        rl_iter = rl.get("n_iter", 0)
+        rl_conv = rl.get("converged", False)
+
+        st.metric("MAE", f"{rl_mae:.3f}")
+        if rl_r2 is not None:
+            st.metric("R²", f"{rl_r2:.3f}")
+        if rl_acc is not None:
+            st.metric("Accuracy", f"{rl_acc*100:.2f}%")
+
+        st.metric("Training Time (s)", f"{rl_time:.3f}")
+        st.metric("Iterations", rl_iter)
+        st.metric("Converged", "✅ Yes" if rl_conv else "❌ No")
+
+    # ---------------- ANN ----------------
+    with col2:
+        st.markdown("### 🧠 Artificial Neural Network")
+
+        ann_mae = ann.get("mae", 0)
+        ann_rmse = ann.get("rmse", None)
+        ann_r2 = ann.get("r2", None)
+        ann_acc = ann.get("accuracy", None)
+        ann_time = ann.get("train_time", 0)
+        ann_iter = ann.get("n_iter", 0)
+        ann_conv = ann.get("converged", False)
+
+        st.metric("MAE", f"{ann_mae:.3f}")
+        if ann_rmse is not None:
+            st.metric("RMSE", f"{ann_rmse:.3f}")
+        if ann_r2 is not None:
+            st.metric("R²", f"{ann_r2:.3f}")
+        if ann_acc is not None:
+            st.metric("Accuracy", f"{ann_acc*100:.2f}%")
+
+        st.metric("Training Time (s)", f"{ann_time:.3f}")
+        st.metric("Iterations", ann_iter)
+        st.metric("Converged", "✅ Yes" if ann_conv else "❌ No")
+
+    # ---------------- NORMALISED SCORE ----------------
+    st.markdown("---")
+    st.markdown("## 🏆 Overall Model Score (Research Metric)")
+
+    def score_model(m):
+        score = 0
+
+        # error (lower is better)
+        if "mae" in m:
+            score += max(0, 1 - m["mae"])
+
+        # r2 (higher is better)
+        if m.get("r2") is not None:
+            score += m["r2"]
+
+        # convergence bonus
+        if m.get("converged"):
+            score += 0.5
+
+        # speed bonus
+        t = m.get("train_time", 1)
+        score += 1 / (1 + t)
+
+        return score
+
+    rl_score = score_model(rl)
+    ann_score = score_model(ann)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.metric("RL Overall Score", f"{rl_score:.3f}")
+
+    with col2:
+        st.metric("ANN Overall Score", f"{ann_score:.3f}")
+
+    # ---------------- WINNER ----------------
+    st.markdown("## 🥇 Final Verdict")
+
+    if rl_score > ann_score:
+        st.success("🏆 Reinforcement Learning performs better overall")
+    elif ann_score > rl_score:
+        st.success("🏆 ANN performs better overall")
     else:
-        st.markdown("### 🔍 Performance Metrics")
+        st.info("🤝 Both models perform similarly")
 
-        # Example structure if both return predictions
-        try:
-            y_true = rl_results["y_true"]
-            y_pred_rl = rl_results["y_pred"]
-            y_pred_ann = ann_results["y_pred"]
+    # ---------------- INSIGHT SUMMARY ----------------
+    st.markdown("## 🧾 Key Insights")
 
-            if pd.api.types.is_numeric_dtype(y_true):
-                mae_rl = mean_absolute_error(y_true, y_pred_rl)
-                mae_ann = mean_absolute_error(y_true, y_pred_ann)
-                r2_rl = r2_score(y_true, y_pred_rl)
-                r2_ann = r2_score(y_true, y_pred_ann)
+    insights = []
 
-                st.metric("RL MAE", f"{mae_rl:.3f}")
-                st.metric("ANN MAE", f"{mae_ann:.3f}")
-                st.metric("RL R²", f"{r2_rl:.3f}")
-                st.metric("ANN R²", f"{r2_ann:.3f}")
-            else:
-                acc_rl = accuracy_score(y_true, y_pred_rl)
-                acc_ann = accuracy_score(y_true, y_pred_ann)
-                f1_rl = f1_score(y_true, y_pred_rl, average='macro')
-                f1_ann = f1_score(y_true, y_pred_ann, average='macro')
+    if rl_conv and not ann_conv:
+        insights.append("RL converged while ANN did not")
+    if ann_conv and not rl_conv:
+        insights.append("ANN converged while RL did not")
 
-                st.metric("RL Accuracy", f"{acc_rl*100:.2f}%")
-                st.metric("ANN Accuracy", f"{acc_ann*100:.2f}%")
-                st.metric("RL F1-score", f"{f1_rl:.3f}")
-                st.metric("ANN F1-score", f"{f1_ann:.3f}")
+    if rl_time < ann_time:
+        insights.append("RL trained faster")
+    else:
+        insights.append("ANN trained faster")
 
-        except Exception as e:
-            st.error(f"Comparison failed: {e}")
+    if rl_mae < ann_mae:
+        insights.append("RL has lower prediction error (MAE)")
+    else:
+        insights.append("ANN has lower prediction error (MAE)")
 
+    for i in insights:
+        st.write("• " + i)        
 with tab8:
-    genai_display.render(df)
+  genai_results = genai_display.render(
+        df,
+        api_key=OPENAI_API_KEY.strip(),
+        n_similar=5
+    )
