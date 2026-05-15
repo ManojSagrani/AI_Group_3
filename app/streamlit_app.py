@@ -1,135 +1,417 @@
+import os
+import sys
+from openai import api_key
 import streamlit as st
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-import random
-import sys
-import os
+from sklearn.metrics import mean_absolute_error, r2_score, accuracy_score, f1_score
+from dotenv import load_dotenv
+import time
 
-# --- PATH SETUP ---
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
-# Attempting imports from your custom modules
-try:
-    from tab_df import display as df_display, logics as df_logics
-    from tab_text import display as text_display
-    from tab_numeric import display as numeric_display
-    from tab_date import display as date_display
-except ImportError:
-    st.error("Custom modules not found. Check your folder structure.")
 
-# --- PAGE CONFIG ---
-st.set_page_config(page_title="Crop Recommendation System", layout="wide", initial_sidebar_state="expanded")
+# Load .env file
+load_dotenv()
 
-st.title("Crop Recommendation System")
-st.markdown("### - AI Optimal Crop Selection based on Soil and Weather Data")
+# Read API key
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# --- SIDEBAR & UPLOAD ---
-st.sidebar.header("Data Settings")
-uploaded_file = st.sidebar.file_uploader("Upload CSV", type=["csv"])
+# ── Path resolution ───────────────────────────────────────────────────────────
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, BASE_DIR)
 
-st.sidebar.markdown("---")
-st.sidebar.subheader("RL Parameters")
-alpha = st.sidebar.slider("Learning Rate (α)", 0.01, 1.0, 0.1)
-gamma = st.sidebar.slider("Discount Factor (γ)", 0.5, 0.99, 0.9)
-episodes = st.sidebar.number_input("Episodes", 100, 5000, 500)
+DATASET_DEFAULT = os.path.join(BASE_DIR, "..", "crop_yield_dataset.csv")
 
-if uploaded_file:
-    # Use your logic to load CSV
-    df = pd.read_csv(uploaded_file)
-    if 'df_logics' in locals():
-        df = df_logics.load_csv(uploaded_file)
-    
-    df['Date'] = pd.to_datetime(df['Date'])
-    st.sidebar.success(f"Loaded: {uploaded_file.name}")
+# ── Module imports ────────────────────────────────────────────────────────────
+from tab_df import display as df_display
+from tab_numeric import display as numeric_display
+from tab_text import display as text_display
+from tab_date import display as date_display
+from tab_rl import display as rl_display
+from tab_ann import display as ann_display
+from tab_genai import display as genai_display
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📊 Overview", "🔢 Numeric", "🔤 Text", "📅 Date", "🤖 RL Yield Model"
-    ])
+# ── Page config ───────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="CropAI — Intelligent Crop Recommendation System",
+    page_icon="🌾",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-    # Standard Tabs (1-4)
-    with tab1:
-        if 'df_display' in locals(): df_display.overview(df)
-        else: st.write(df.head())
-    with tab2:
-        if 'numeric_display' in locals(): numeric_display.numeric_series(df)
-    with tab3:
-        if 'text_display' in locals(): text_display.text_series(df)
-    with tab4:
-        if 'date_display' in locals(): date_display.datetime_series(df)
+# ── Custom CSS ────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+    div[data-testid="metric-container"] {
+        background: rgba(33, 150, 243, 0.08);
+        border: 1px solid rgba(33, 150, 243, 0.2);
+        border-radius: 8px;
+        padding: 12px;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-    # --- TAB 5: RL LOGIC + DOWNLOAD ---
-    with tab5:
-        st.header("Temporal Difference (TD) Learning Grid")
-        
-        # 1. Preprocessing
-        cat_cols = [col for col in ["Crop_Type", "Soil_Type"] if col in df.columns]
-        df_encoded = pd.get_dummies(df, columns=cat_cols).sort_values("Date")
-        
-        grid_size = int(len(df_encoded)**0.5)
-        n_states = grid_size * grid_size
-        
-        # 2. RL Functions
-        def get_possible_actions(s):
-            row, col = divmod(s, grid_size)
-            actions = []
-            if col > 0: actions.append(0)
-            if col < grid_size - 1: actions.append(1)
-            if row > 0: actions.append(2)
-            if row < grid_size - 1: actions.append(3)
-            return actions
+# ── Header ────────────────────────────────────────────────────────────────────
+st.title("🌾 CropAI — Intelligent Crop Recommendation System")
+st.markdown("*Integrating RL · ANN · GenAI for optimal crop recommendations.*")
 
-        def next_state(s, a):
-            if a == 0: return s - 1
-            if a == 1: return s + 1
-            if a == 2: return s - grid_size
-            if a == 3: return s + grid_size
-            return s
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.image("https://img.icons8.com/fluency/96/wheat.png", width=80)
+    st.markdown("## 🌾 CropAI Settings")
 
-        def get_reward(s):
-            return df_encoded.iloc[s]["Crop_Yield"] if "Crop_Yield" in df_encoded.columns else 0
+    st.markdown("### 📂 Dataset")
+    use_default = os.path.isfile(DATASET_DEFAULT)
+    upload_label = "Upload a CSV file" if not use_default else "Upload a custom CSV (or use bundled)"
+    uploaded_file = st.file_uploader(upload_label, type=["csv"])
 
-        # 3. Training Execution
-        if st.button("🚀 Run RL Training"):
-            V = np.zeros(n_states)
-            bar = st.progress(0)
-            
-            for ep in range(episodes):
-                state = 0
-                for _ in range(50):
-                    actions = get_possible_actions(state)
-                    if not actions: break
-                    n_s = next_state(state, random.choice(actions))
-                    reward = get_reward(n_s)
-                    V[state] += alpha * (reward + gamma * V[n_s] - V[state])
-                    state = n_s
-                if ep % (max(1, episodes // 10)) == 0:
-                    bar.progress(ep / episodes)
-            bar.empty()
-            
-            # Store in session state for persistency
-            st.session_state.trained_V = V.reshape(grid_size, grid_size)
-            st.success("Training Complete!")
+    if uploaded_file:
+        df_raw = pd.read_csv(uploaded_file)
+        st.success(f"✅ Loaded: {uploaded_file.name} ({len(df_raw):,} rows)")
+    elif use_default:
+        df_raw = pd.read_csv(DATASET_DEFAULT)
+        st.success(f"✅ Using bundled dataset ({len(df_raw):,} rows)")
+    else:
+        df_raw = None
+        st.warning("Upload a CSV file to begin.")
 
-        # 4. Display & Export
-        if 'trained_V' in st.session_state:
-            V_grid = st.session_state.trained_V
-            
-            # Visualization
-            fig, ax = plt.subplots(figsize=(8, 6))
-            sns.heatmap(V_grid, annot=True, cmap="YlGnBu", ax=ax)
-            st.pyplot(fig)
-            
-            # Download Button
-            v_df = pd.DataFrame(V_grid)
-            csv_data = v_df.to_csv(index=False).encode('utf-8')
-            
-            st.download_button(
-                label="📥 Download Learned Value Table (CSV)",
-                data=csv_data,
-                file_name="learned_crop_values.csv",
-                mime="text/csv",
+    st.markdown("---")
+    st.markdown("### ⚙️ Preprocessing Parameters")
+    n_temp_bins = st.slider("Temperature bins", 2, 20, 8, step=1)
+    n_humidity_bins = st.slider("Humidity bins", 2, 20, 8, step=1)
+
+    st.markdown("---")
+
+    # RL PARAMETERS
+    st.markdown("### 🤖 RL — Q-Learning Parameters")
+    rl_alpha = st.slider("Learning Rate (α)", 0.01, 1.0, 0.6, 0.01)
+    rl_gamma = st.slider("Discount Factor (γ)", 0.5, 0.99, 0.9, 0.01)
+    rl_epsilon = st.slider("Exploration (ε)", 0.05, 1.0, 0.3, 0.05)
+    rl_episodes = st.number_input("Training Episodes", 100, 5000, 1000, step=100)
+
+    st.markdown("---")
+
+    # ANN PARAMETERS
+    st.markdown("### 🧠 ANN — MLP Parameters")
+    ann_layers_str = st.text_input("Hidden Layers", "128,64,32")
+    try:
+        ann_hidden = tuple(int(x.strip()) for x in ann_layers_str.split(",") if x.strip())
+    except ValueError:
+        ann_hidden = (128, 64, 32)
+    ann_activation = st.selectbox("Activation Function", ["relu", "tanh", "logistic"], index=0)
+    ann_alpha = st.select_slider("L2 Regularisation (α)", [1e-5, 1e-4, 1e-3, 1e-2], value=1e-4)
+    ann_max_iter = st.number_input("Max Iterations", 100, 2000, 500, step=100)
+
+if df_raw is None:
+    st.info("👈 Upload a CSV to continue.")
+    st.stop()
+
+df = df_raw.copy()
+if "Date" in df.columns:
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+
+# ── Tabs ──────────────────────────────────────────────────────────────────────
+TAB_LABELS = [
+    "📊 Overview",
+    "🔢 Numeric",
+    "🔤 Text",
+    "📅 Date",
+    "🤖 Reinforcement Learning",
+    "🧠 Neural Network",
+    "📈 Model Comparison",   # ← NEW TAB
+    "✨ GenAI Advisor",
+]
+
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(TAB_LABELS)
+
+with tab1:
+    df_display.overview(df)
+
+with tab2:
+    numeric_display.numeric_serie(df)
+
+with tab3:
+    text_display.text_serie(df)
+
+with tab4:
+    date_display.datetime_serie(df)
+
+with tab5:
+    rl_results = rl_display.render(
+        df,
+        alpha=rl_alpha,
+        gamma=rl_gamma,
+        epsilon=rl_epsilon,
+        episodes=int(rl_episodes)
+       
+    )
+
+with tab6:
+    ann_results = ann_display.render(
+        df,
+        hidden_layers=ann_hidden,
+        activation=ann_activation,
+        alpha=ann_alpha,
+        max_iter=int(ann_max_iter),
+        n_temp_bins=int(n_temp_bins),
+        n_humidity_bins=int(n_humidity_bins)
+    )
+
+# ── NEW TAB:  Comparison ─────────────────────────────────────────────────
+# ──  COMPARISON TAB ──────────────────────────────────────────────────────
+with tab7:
+
+    st.subheader("📊 Research-Grade Model Comparison (RL vs ANN)")
+
+    rl = st.session_state.get("rl_results")
+    ann = st.session_state.get("ann_results")
+
+    # ---------------- SAFETY ----------------
+    if rl is None or ann is None:
+        st.warning("⚠️ Please train BOTH RL and ANN models first.")
+        st.stop()
+
+    if not isinstance(rl, dict) or not isinstance(ann, dict):
+        st.error("❌ Invalid model outputs.")
+        st.stop()
+
+    st.markdown("## 📌 Performance + Efficiency Overview")
+
+    col1, col2 = st.columns(2)
+
+    # =====================================================================
+    # RL SECTION
+    # =====================================================================
+    with col1:
+
+        st.markdown("### 🤖 Reinforcement Learning")
+
+        rl_mae = rl.get("mae", 0)
+
+        # REPLACED R² WITH REWARD GAIN
+        rl_reward_gain = rl.get("reward_gain", rl.get("improvement_pct", 0))
+
+        rl_acc = rl.get("accuracy", None)
+        rl_time = rl.get("train_time", 0)
+        rl_iter = rl.get("n_iter", 0)
+        rl_conv = rl.get("converged", False)
+
+        st.metric("MAE", f"{rl_mae:.3f}")
+
+        # RL-SPECIFIC METRIC
+        st.metric(
+            "Reward Gain",
+            f"{rl_reward_gain:.2f}%"
+        )
+
+        if rl_acc is not None:
+            st.metric(
+                "Accuracy",
+                f"{rl_acc * 100:.2f}%"
             )
-else:
-    st.info("Please upload a CSV file to begin.")
+
+        st.metric(
+            "Training Time (s)",
+            f"{rl_time:.3f}"
+        )
+
+        st.metric(
+            "Iterations",
+            rl_iter
+        )
+
+        st.metric(
+            "Converged",
+            "✅ Yes" if rl_conv else "❌ No"
+        )
+
+    # =====================================================================
+    # ANN SECTION
+    # =====================================================================
+    with col2:
+
+        st.markdown("### 🧠 Artificial Neural Network")
+
+        ann_mae = ann.get("mae", 0)
+        ann_rmse = ann.get("rmse", None)
+
+        # FIXED
+        ann_r2 = ann.get("r2", None)
+
+        ann_acc = ann.get("accuracy", None)
+        ann_time = ann.get("train_time", 0)
+        ann_iter = ann.get("n_iter", 0)
+        ann_conv = ann.get("converged", False)
+
+        st.metric("MAE", f"{ann_mae:.3f}")
+
+        if ann_rmse is not None:
+            st.metric(
+                "RMSE",
+                f"{ann_rmse:.3f}"
+            )
+
+        if ann_r2 is not None:
+            st.metric(
+                "R² Score",
+                f"{ann_r2:.3f}"
+            )
+
+        if ann_acc is not None:
+            st.metric(
+                "Accuracy",
+                f"{ann_acc * 100:.2f}%"
+            )
+
+        st.metric(
+            "Training Time (s)",
+            f"{ann_time:.3f}"
+        )
+
+        st.metric(
+            "Iterations",
+            ann_iter
+        )
+
+        st.metric(
+            "Converged",
+            "✅ Yes" if ann_conv else "❌ No"
+        )
+
+    # =====================================================================
+    # NORMALISED SCORE
+    # =====================================================================
+    st.markdown("---")
+    st.markdown("## 🏆 Overall Model Score (Research Metric)")
+
+    def score_model(m, model_type="ANN"):
+
+        score = 0
+
+        # -------------------------------------------------
+        # LOWER ERROR = BETTER
+        # -------------------------------------------------
+        mae = m.get("mae", 1)
+        score += max(0, 1 - mae)
+
+        # -------------------------------------------------
+        # RL USES REWARD GAIN
+        # ANN USES R²
+        # -------------------------------------------------
+        if model_type == "RL":
+
+            reward_gain = m.get(
+                "reward_gain",
+                m.get("improvement_pct", 0)
+            )
+
+            # normalise %
+            score += reward_gain / 100
+
+        else:
+
+            r2 = m.get("r2", 0)
+            score += max(0, r2)
+
+        # -------------------------------------------------
+        # CONVERGENCE BONUS
+        # -------------------------------------------------
+        if m.get("converged"):
+            score += 0.5
+
+        # -------------------------------------------------
+        # SPEED BONUS
+        # -------------------------------------------------
+        t = m.get("train_time", 1)
+        score += 1 / (1 + t)
+
+        return score
+
+    rl_score = score_model(rl, "RL")
+    ann_score = score_model(ann, "ANN")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.metric(
+            "RL Overall Score",
+            f"{rl_score:.3f}"
+        )
+
+    with col2:
+        st.metric(
+            "ANN Overall Score",
+            f"{ann_score:.3f}"
+        )
+
+    # =====================================================================
+    # FINAL VERDICT
+    # =====================================================================
+    st.markdown("## 🥇 Final Verdict")
+
+    if rl_score > ann_score:
+        st.success(
+            "🏆 Reinforcement Learning performs better overall"
+        )
+
+    elif ann_score > rl_score:
+        st.success(
+            "🏆 ANN performs better overall"
+        )
+
+    else:
+        st.info(
+            "🤝 Both models perform similarly"
+        )
+
+    # =====================================================================
+    # INSIGHT SUMMARY
+    # =====================================================================
+    st.markdown("## 🧾 Key Insights")
+
+    insights = []
+
+    if rl_conv and not ann_conv:
+        insights.append(
+            "RL converged while ANN did not"
+        )
+
+    if ann_conv and not rl_conv:
+        insights.append(
+            "ANN converged while RL did not"
+        )
+
+    if rl_time < ann_time:
+        insights.append(
+            "RL trained faster"
+        )
+    else:
+        insights.append(
+            "ANN trained faster"
+        )
+
+    if rl_mae < ann_mae:
+        insights.append(
+            "RL has lower prediction error (MAE)"
+        )
+    else:
+        insights.append(
+            "ANN has lower prediction error (MAE)"
+        )
+
+    if rl_reward_gain > 0:
+        insights.append(
+            f"RL improved policy reward by "
+            f"{rl_reward_gain:.2f}% over baseline"
+        )
+
+    for i in insights:
+        st.write("• " + i)
+
+# ── TAB 8 ────────────────────────────────────────────────────────────────
+with tab8:
+
+    genai_results = genai_display.render(
+        df,
+        api_key=OPENAI_API_KEY.strip(),
+        n_similar=5
+    )    
