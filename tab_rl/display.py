@@ -8,6 +8,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import seaborn as sns
+import time
 from tab_rl import logics
 
 
@@ -20,7 +21,8 @@ CROP_PALETTE = [
 def render(df, alpha, gamma, epsilon, episodes):
 
     st.title("🌾 RL Crop Optimisation (Q-Learning)")
-
+    start_time = time.time()
+    
     # =========================
     # TRAIN MODEL (ONLY ON CLICK)
     # =========================
@@ -37,7 +39,11 @@ def render(df, alpha, gamma, epsilon, episodes):
                 episodes=episodes
             )
 
+        train_time = time.time() - start_time
+        res["train_time"] = train_time
         st.session_state.rl_results = res
+        
+        
         st.success("Training complete")
 
     # =========================

@@ -3,7 +3,7 @@
 # ================================
 import numpy as np
 import pandas as pd
-
+import time
 
 # =========================================================
 # ENVIRONMENT BUILDING
@@ -81,6 +81,9 @@ def prepare_rl_environment(df: pd.DataFrame, n_temp_bins: int = 8, n_humidity_bi
 # =========================================================
 # Q-LEARNING
 # =========================================================
+import numpy as np
+
+
 def run_q_learning(
     R_norm,
     n_states,
@@ -91,52 +94,129 @@ def run_q_learning(
     episodes=500,
     seed=42
 ):
+
+    # =========================================================
+    # REPRODUCIBILITY
+    # =========================================================
     np.random.seed(seed)
 
+    # =========================================================
+    # INITIALISE Q TABLE
+    # =========================================================
     Q = np.zeros((n_states, n_actions))
 
+    # =========================================================
+    # TRACKING VARIABLES
+    # =========================================================
     ep_rewards = []
     eps_hist = []
     q_delta = []
 
+    # =========================================================
+    # EPSILON DECAY
+    # =========================================================
     epsilon = epsilon_start
-    epsilon_min = 0.01
-    decay = (epsilon_start - epsilon_min) / max(episodes, 1)
 
+    epsilon_min = 0.01
+
+    # smoother exponential decay
+    epsilon_decay = 0.995
+
+    # =========================================================
+    # PREVIOUS Q TABLE
+    # =========================================================
     prev_Q = Q.copy()
 
+    # =========================================================
+    # TRAINING LOOP
+    # =========================================================
     for ep in range(episodes):
+
+        # random starting state
         state = np.random.randint(n_states)
-        total = 0.0
 
-        for _ in range(50):
+        total_reward = 0.0
 
+        # =====================================================
+        # EPISODE STEPS
+        # =====================================================
+        for step in range(50):
+
+            # -------------------------------------------------
+            # ε-GREEDY ACTION SELECTION
+            # -------------------------------------------------
             if np.random.rand() < epsilon:
+
+                # exploration
                 action = np.random.randint(n_actions)
+
             else:
+
+                # exploitation
                 action = np.argmax(Q[state])
 
+            # -------------------------------------------------
+            # GET REWARD
+            # -------------------------------------------------
             reward = R_norm[state, action]
+
+            # random transition
             next_state = np.random.randint(n_states)
 
-            # Q update
-            Q[state, action] += alpha * (
-                reward + gamma * np.max(Q[next_state]) - Q[state, action]
-            )
+            # -------------------------------------------------
+            # Q-LEARNING UPDATE
+            # -------------------------------------------------
+            old_q = Q[state, action]
 
+            td_target = reward + gamma * np.max(Q[next_state])
+
+            td_error = td_target - old_q
+
+            Q[state, action] = old_q + alpha * td_error
+
+            # -------------------------------------------------
+            # MOVE TO NEXT STATE
+            # -------------------------------------------------
             state = next_state
-            total += reward
 
-        epsilon = max(epsilon_min, epsilon - decay)
+            # accumulate reward
+            total_reward += reward
 
-        ep_rewards.append(total)
-        eps_hist.append(epsilon)
+        # =====================================================
+        # EPSILON DECAY
+        # =====================================================
+        epsilon = max(
+            epsilon_min,
+            epsilon * epsilon_decay
+        )
 
+        # =====================================================
+        # STORE HISTORY
+        # =====================================================
+        ep_rewards.append(float(total_reward))
+
+        eps_hist.append(float(epsilon))
+
+        # =====================================================
+        # Q-TABLE CHANGE TRACKING
+        # =====================================================
         if ep % 10 == 0:
-            q_delta.append(float(np.mean(np.abs(Q - prev_Q))))
+
+            delta = np.mean(np.abs(Q - prev_Q))
+
+            q_delta.append(float(delta))
+
             prev_Q = Q.copy()
 
-    return Q, ep_rewards, eps_hist, q_delta
+    # =========================================================
+    # RETURN RESULTS
+    # =========================================================
+    return (
+        Q,
+        ep_rewards,
+        eps_hist,
+        q_delta
+    )
 
 
 # =========================================================
@@ -169,6 +249,7 @@ def crop_state_distribution(optimal_crops, crop_types, n_temp_bins, n_humidity_b
 # =========================================================
 # MAIN MODEL
 # =========================================================
+
 def build_rl_model(
     df,
     n_temp_bins: int = 8,
@@ -179,45 +260,144 @@ def build_rl_model(
     episodes=500
 ):
 
+    # =========================
+    # START TIMER
+    # =========================
+    start_time = time.time()
+
+    # =========================
+    # PREP ENVIRONMENT
+    # =========================
     R, R_norm, crop_types, n_states, n_actions, temp_labels, hum_labels, nt, nh, R_max = \
         prepare_rl_environment(df, n_temp_bins, n_humidity_bins)
 
+    # =========================
+    # TRAIN Q-LEARNING
+    # =========================
     Q, ep_rewards, eps_hist, q_delta = run_q_learning(
-        R_norm, n_states, n_actions,
-        alpha, gamma, epsilon, episodes
+        R_norm,
+        n_states,
+        n_actions,
+        alpha,
+        gamma,
+        epsilon,
+        episodes
     )
 
+    # =========================
+    # POLICY EXTRACTION
+    # =========================
     optimal_crops, optimal_idx = get_optimal_policy(Q, crop_types)
 
     learned, random_mean = policy_improvement_ratio(R, optimal_idx)
 
     policy_grid = crop_state_distribution(
-        optimal_crops, crop_types, nt, nh
+        optimal_crops,
+        crop_types,
+        nt,
+        nh
     )
 
-    improvement_pct = (learned - random_mean) / max(random_mean, 1e-6) * 100
+    # =========================
+    # IMPROVEMENT %
+    # =========================
+    improvement_pct = (
+        (learned - random_mean)
+        / max(random_mean, 1e-6)
+    ) * 100
 
+    # =========================
+    # RL PERFORMANCE METRICS
+    # =========================
 
+    # Mean Absolute Error
+    mae = np.mean(np.abs(Q - R_norm))
 
+    # Approximate R²
+    ss_res = np.sum((R_norm - Q) ** 2)
+    ss_tot = np.sum((R_norm - np.mean(R_norm)) ** 2)
+
+    r2 = 1 - (ss_res / (ss_tot + 1e-8))
+
+    # Action prediction accuracy
+    predicted_actions = np.argmax(Q, axis=1)
+    optimal_actions = np.argmax(R_norm, axis=1)
+
+    accuracy = np.mean(predicted_actions == optimal_actions)
+
+    # =========================
+    # CONVERGENCE DETECTION
+    # =========================
+
+    converged = False
+    convergence_score = 0.0
+
+    if len(q_delta) >= 50:
+
+        # Examine last 50 Q-updates
+        recent_delta = np.array(q_delta[-50:])
+
+        mean_delta = np.mean(recent_delta)
+        std_delta = np.std(recent_delta)
+
+        # Stable + tiny updates = convergence
+        if mean_delta < 1e-3 and std_delta < 1e-4:
+            converged = True
+
+        # Confidence score
+        convergence_score = 1 / (1 + mean_delta + std_delta)
+
+    # =========================
+    # TRAINING TIME
+    # =========================
+    train_time = time.time() - start_time
+
+    # =========================
+    # RETURN RESULTS
+    # =========================
     return {
+
+        # Core RL Outputs
         "Q": Q,
         "R": R,
         "R_max": R_max,
+
+        # Training History
         "ep_rewards": ep_rewards,
         "eps_hist": eps_hist,
         "q_delta": q_delta,
+
+        # Policy
         "optimal_crops": optimal_crops,
         "optimal_idx": optimal_idx,
         "policy_grid": policy_grid,
+
+        # Labels
         "crop_types": crop_types,
         "temp_labels": temp_labels,
         "hum_labels": hum_labels,
+
+        # Grid Dimensions
         "nt": nt,
         "nh": nh,
+
+        # RL Reward Metrics
         "learned_mean": float(learned),
         "random_mean": float(random_mean),
         "improvement_pct": float(improvement_pct),
-        "converged": bool(len(q_delta) and q_delta[-1] < 1e-3)
+
+        # Performance Metrics
+        "mae": float(mae),
+        "r2": float(r2),
+        "accuracy": float(accuracy),
+
+        # Training Stats
+        "train_time": float(train_time),
+        "n_iter": int(episodes),
+
+        # Convergence
+        "converged": bool(converged),
+        "convergence_score": float(convergence_score)
     }
     
 def moving_average(x, window=10):

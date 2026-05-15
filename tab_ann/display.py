@@ -20,7 +20,8 @@ def _architecture_str(hidden_layers):
 def render(df: pd.DataFrame, hidden_layers: tuple, activation: str,
            alpha: float, max_iter: int,selected_crop=None, n_temp_bins=10, n_humidity_bins=10):
 
-
+    start_time = time.time()
+    
     st.markdown("## Artificial Neural Network — Multi-Layer Perceptron")
 
     with st.expander("📖 Methodology & Architecture", expanded=False):

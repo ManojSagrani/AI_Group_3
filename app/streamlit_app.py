@@ -83,10 +83,10 @@ with st.sidebar:
 
     # RL PARAMETERS
     st.markdown("### 🤖 RL — Q-Learning Parameters")
-    rl_alpha = st.slider("Learning Rate (α)", 0.01, 1.0, 0.1, 0.01)
+    rl_alpha = st.slider("Learning Rate (α)", 0.01, 1.0, 0.6, 0.01)
     rl_gamma = st.slider("Discount Factor (γ)", 0.5, 0.99, 0.9, 0.01)
     rl_epsilon = st.slider("Exploration (ε)", 0.05, 1.0, 0.3, 0.05)
-    rl_episodes = st.number_input("Training Episodes", 100, 5000, 500, step=100)
+    rl_episodes = st.number_input("Training Episodes", 100, 5000, 1000, step=100)
 
     st.markdown("---")
 
@@ -159,6 +159,7 @@ with tab6:
 # ── NEW TAB:  Comparison ─────────────────────────────────────────────────
 # ──  COMPARISON TAB ──────────────────────────────────────────────────────
 with tab7:
+
     st.subheader("📊 Research-Grade Model Comparison (RL vs ANN)")
 
     rl = st.session_state.get("rl_results")
@@ -177,122 +178,240 @@ with tab7:
 
     col1, col2 = st.columns(2)
 
-    # ---------------- RL ----------------
+    # =====================================================================
+    # RL SECTION
+    # =====================================================================
     with col1:
+
         st.markdown("### 🤖 Reinforcement Learning")
 
         rl_mae = rl.get("mae", 0)
-        rl_r2 = rl.get("r2", None)
+
+        # REPLACED R² WITH REWARD GAIN
+        rl_reward_gain = rl.get("reward_gain", rl.get("improvement_pct", 0))
+
         rl_acc = rl.get("accuracy", None)
         rl_time = rl.get("train_time", 0)
         rl_iter = rl.get("n_iter", 0)
         rl_conv = rl.get("converged", False)
 
         st.metric("MAE", f"{rl_mae:.3f}")
-        if rl_r2 is not None:
-            st.metric("R²", f"{rl_r2:.3f}")
+
+        # RL-SPECIFIC METRIC
+        st.metric(
+            "Reward Gain",
+            f"{rl_reward_gain:.2f}%"
+        )
+
         if rl_acc is not None:
-            st.metric("Accuracy", f"{rl_acc*100:.2f}%")
+            st.metric(
+                "Accuracy",
+                f"{rl_acc * 100:.2f}%"
+            )
 
-        st.metric("Training Time (s)", f"{rl_time:.3f}")
-        st.metric("Iterations", rl_iter)
-        st.metric("Converged", "✅ Yes" if rl_conv else "❌ No")
+        st.metric(
+            "Training Time (s)",
+            f"{rl_time:.3f}"
+        )
 
-    # ---------------- ANN ----------------
+        st.metric(
+            "Iterations",
+            rl_iter
+        )
+
+        st.metric(
+            "Converged",
+            "✅ Yes" if rl_conv else "❌ No"
+        )
+
+    # =====================================================================
+    # ANN SECTION
+    # =====================================================================
     with col2:
+
         st.markdown("### 🧠 Artificial Neural Network")
 
         ann_mae = ann.get("mae", 0)
         ann_rmse = ann.get("rmse", None)
+
+        # FIXED
         ann_r2 = ann.get("r2", None)
+
         ann_acc = ann.get("accuracy", None)
         ann_time = ann.get("train_time", 0)
         ann_iter = ann.get("n_iter", 0)
         ann_conv = ann.get("converged", False)
 
         st.metric("MAE", f"{ann_mae:.3f}")
+
         if ann_rmse is not None:
-            st.metric("RMSE", f"{ann_rmse:.3f}")
+            st.metric(
+                "RMSE",
+                f"{ann_rmse:.3f}"
+            )
+
         if ann_r2 is not None:
-            st.metric("R²", f"{ann_r2:.3f}")
+            st.metric(
+                "R² Score",
+                f"{ann_r2:.3f}"
+            )
+
         if ann_acc is not None:
-            st.metric("Accuracy", f"{ann_acc*100:.2f}%")
+            st.metric(
+                "Accuracy",
+                f"{ann_acc * 100:.2f}%"
+            )
 
-        st.metric("Training Time (s)", f"{ann_time:.3f}")
-        st.metric("Iterations", ann_iter)
-        st.metric("Converged", "✅ Yes" if ann_conv else "❌ No")
+        st.metric(
+            "Training Time (s)",
+            f"{ann_time:.3f}"
+        )
 
-    # ---------------- NORMALISED SCORE ----------------
+        st.metric(
+            "Iterations",
+            ann_iter
+        )
+
+        st.metric(
+            "Converged",
+            "✅ Yes" if ann_conv else "❌ No"
+        )
+
+    # =====================================================================
+    # NORMALISED SCORE
+    # =====================================================================
     st.markdown("---")
     st.markdown("## 🏆 Overall Model Score (Research Metric)")
 
-    def score_model(m):
+    def score_model(m, model_type="ANN"):
+
         score = 0
 
-        # error (lower is better)
-        if "mae" in m:
-            score += max(0, 1 - m["mae"])
+        # -------------------------------------------------
+        # LOWER ERROR = BETTER
+        # -------------------------------------------------
+        mae = m.get("mae", 1)
+        score += max(0, 1 - mae)
 
-        # r2 (higher is better)
-        if m.get("r2") is not None:
-            score += m["r2"]
+        # -------------------------------------------------
+        # RL USES REWARD GAIN
+        # ANN USES R²
+        # -------------------------------------------------
+        if model_type == "RL":
 
-        # convergence bonus
+            reward_gain = m.get(
+                "reward_gain",
+                m.get("improvement_pct", 0)
+            )
+
+            # normalise %
+            score += reward_gain / 100
+
+        else:
+
+            r2 = m.get("r2", 0)
+            score += max(0, r2)
+
+        # -------------------------------------------------
+        # CONVERGENCE BONUS
+        # -------------------------------------------------
         if m.get("converged"):
             score += 0.5
 
-        # speed bonus
+        # -------------------------------------------------
+        # SPEED BONUS
+        # -------------------------------------------------
         t = m.get("train_time", 1)
         score += 1 / (1 + t)
 
         return score
 
-    rl_score = score_model(rl)
-    ann_score = score_model(ann)
+    rl_score = score_model(rl, "RL")
+    ann_score = score_model(ann, "ANN")
 
     col1, col2 = st.columns(2)
 
     with col1:
-        st.metric("RL Overall Score", f"{rl_score:.3f}")
+        st.metric(
+            "RL Overall Score",
+            f"{rl_score:.3f}"
+        )
 
     with col2:
-        st.metric("ANN Overall Score", f"{ann_score:.3f}")
+        st.metric(
+            "ANN Overall Score",
+            f"{ann_score:.3f}"
+        )
 
-    # ---------------- WINNER ----------------
+    # =====================================================================
+    # FINAL VERDICT
+    # =====================================================================
     st.markdown("## 🥇 Final Verdict")
 
     if rl_score > ann_score:
-        st.success("🏆 Reinforcement Learning performs better overall")
-    elif ann_score > rl_score:
-        st.success("🏆 ANN performs better overall")
-    else:
-        st.info("🤝 Both models perform similarly")
+        st.success(
+            "🏆 Reinforcement Learning performs better overall"
+        )
 
-    # ---------------- INSIGHT SUMMARY ----------------
+    elif ann_score > rl_score:
+        st.success(
+            "🏆 ANN performs better overall"
+        )
+
+    else:
+        st.info(
+            "🤝 Both models perform similarly"
+        )
+
+    # =====================================================================
+    # INSIGHT SUMMARY
+    # =====================================================================
     st.markdown("## 🧾 Key Insights")
 
     insights = []
 
     if rl_conv and not ann_conv:
-        insights.append("RL converged while ANN did not")
+        insights.append(
+            "RL converged while ANN did not"
+        )
+
     if ann_conv and not rl_conv:
-        insights.append("ANN converged while RL did not")
+        insights.append(
+            "ANN converged while RL did not"
+        )
 
     if rl_time < ann_time:
-        insights.append("RL trained faster")
+        insights.append(
+            "RL trained faster"
+        )
     else:
-        insights.append("ANN trained faster")
+        insights.append(
+            "ANN trained faster"
+        )
 
     if rl_mae < ann_mae:
-        insights.append("RL has lower prediction error (MAE)")
+        insights.append(
+            "RL has lower prediction error (MAE)"
+        )
     else:
-        insights.append("ANN has lower prediction error (MAE)")
+        insights.append(
+            "ANN has lower prediction error (MAE)"
+        )
+
+    if rl_reward_gain > 0:
+        insights.append(
+            f"RL improved policy reward by "
+            f"{rl_reward_gain:.2f}% over baseline"
+        )
 
     for i in insights:
-        st.write("• " + i)        
+        st.write("• " + i)
+
+# ── TAB 8 ────────────────────────────────────────────────────────────────
 with tab8:
-  genai_results = genai_display.render(
+
+    genai_results = genai_display.render(
         df,
         api_key=OPENAI_API_KEY.strip(),
         n_similar=5
-    )
+    )    
