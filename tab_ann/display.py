@@ -1,3 +1,4 @@
+import time
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -17,8 +18,10 @@ def _architecture_str(hidden_layers):
 
 
 def render(df: pd.DataFrame, hidden_layers: tuple, activation: str,
-           alpha: float, max_iter: int):
+           alpha: float, max_iter: int,selected_crop=None, n_temp_bins=10, n_humidity_bins=10):
 
+    start_time = time.time()
+    
     st.markdown("## Artificial Neural Network — Multi-Layer Perceptron")
 
     with st.expander("📖 Methodology & Architecture", expanded=False):
@@ -49,30 +52,103 @@ Permutation-based feature importance is computed post-training on the held-out t
     regression_mode = task.startswith("Yield")
 
     if st.button("🧠 Train Neural Network", type="primary", use_container_width=True):
-        with st.spinner("Preprocessing & training…"):
-            if regression_mode:
-                X, y, feat_names = logics.preprocess_regression(df)
-                model, scaler, X_te_s, y_te, y_pred, metrics = logics.train_regressor(
-                    X, y, hidden_layers, activation, alpha, max_iter
-                )
-                imp_df = logics.feature_importance(model, X_te_s, y_te, feat_names)
-                st.session_state.ann_reg = {
-                    "model": model, "scaler": scaler, "feat_names": feat_names,
-                    "y_te": y_te, "y_pred": y_pred, "metrics": metrics, "imp_df": imp_df,
-                }
-            else:
-                X, y, feat_names, le = logics.preprocess_classification(df)
-                model, scaler, X_te_s, y_te, y_pred, y_proba, metrics = logics.train_classifier(
-                    X, y, le, hidden_layers, activation, alpha, max_iter
-                )
-                imp_df = logics.feature_importance(model, X_te_s, y_te, feat_names)
-                st.session_state.ann_cls = {
-                    "model": model, "scaler": scaler, "feat_names": feat_names,
-                    "le": le, "y_te": y_te, "y_pred": y_pred, "y_proba": y_proba,
-                    "metrics": metrics, "imp_df": imp_df,
-                }
-        st.success("✅ Training complete!")
 
+        
+        start_time = time.time()
+
+    with st.spinner("Preprocessing & training…"):
+
+        if regression_mode:
+            X, y, feat_names = logics.preprocess_regression(df)
+
+            model, scaler, X_te_s, y_te, y_pred, metrics = logics.train_regressor(
+                X, y, hidden_layers, activation, alpha, max_iter
+            )
+
+            imp_df = logics.feature_importance(model, X_te_s, y_te, feat_names)
+            
+            train_time = time.time() - start_time
+
+            ann_results = {
+                # performance
+                "mae": float(metrics["mae"]),
+                "rmse": float(metrics["rmse"]),
+                "r2": float(metrics["r2"]),
+
+                # convergence
+                "n_iter": int(metrics["n_iter"]),
+                "converged": bool(metrics["converged"]),
+
+                # efficiency
+                "train_time": float(train_time),
+
+                # internal outputs (for plots)
+                "y_te": y_te,
+                "y_pred": y_pred,
+                "loss_curve": model.loss_curve_,
+                "feat_names": feat_names
+            }
+
+            st.session_state.ann_results = ann_results
+
+            st.session_state.ann_reg = {
+                "model": model,
+                "scaler": scaler,
+                "feat_names": feat_names,
+                "y_te": y_te,
+                "y_pred": y_pred,
+                "metrics": metrics,
+                "imp_df": imp_df,
+            }
+
+        else:
+            X, y, feat_names, le = logics.preprocess_classification(df)
+            
+            start_time = time.time()
+            model, scaler, X_te_s, y_te, y_pred, y_proba, metrics = logics.train_classifier(
+                X, y, le, hidden_layers, activation, alpha, max_iter
+            )
+
+            imp_df = logics.feature_importance(model, X_te_s, y_te, feat_names)
+           
+            train_time = time.time() - start_time
+
+            ann_results = {
+                # performance
+                "accuracy": float(metrics["accuracy"]),
+
+                # convergence
+                "n_iter": int(metrics["n_iter"]),
+                "converged": bool(metrics["converged"]),
+
+                # efficiency
+                "train_time": float(train_time),
+
+                # internal outputs
+                "y_te": y_te,
+                "y_pred": y_pred,
+                "loss_curve": model.loss_curve_,
+                "feat_names": feat_names
+            }
+
+            st.session_state.ann_results = ann_results
+
+            st.session_state.ann_cls = {
+                "model": model,
+                "scaler": scaler,
+                "feat_names": feat_names,
+                "le": le,
+                "y_te": y_te,
+                "y_pred": y_pred,
+                "y_proba": y_proba,
+                "metrics": metrics,
+                "imp_df": imp_df,
+            }
+
+    st.success("✅ Training complete!")
+    
+    
+    
     # ── Regression Results ────────────────────────────────────────────────────
     if regression_mode and "ann_reg" in st.session_state:
         res = st.session_state.ann_reg

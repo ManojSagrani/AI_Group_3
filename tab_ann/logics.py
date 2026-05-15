@@ -130,10 +130,11 @@ def train_classifier(X, y, le, hidden_layers=(128, 64, 32), activation="relu",
         "train_size": len(X_tr),
         "test_size": len(X_te),
         "n_iter": model.n_iter_,
-        "converged": model.n_iter_ < max_iter,
+        "converged": model.n_iter_ < max_iter
+   
     }
     return model, scaler, X_te_s, y_te, y_pred, y_proba, metrics
-
+  
 
 def feature_importance(model, X_test, y_test, feature_names, n_repeats=8, random_state=42):
     """Permutation-based feature importance (model-agnostic, unbiased)."""
